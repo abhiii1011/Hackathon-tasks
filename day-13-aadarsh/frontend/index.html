@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Notes App</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background:#f5f7fa; color:#222; }
+    header { background:#2563eb; color:#fff; padding:1rem 1.25rem; }
+    header h1 { margin:0; font-size:1.25rem; }
+    main { max-width:900px; margin:1rem auto 3rem; padding:0 1rem; }
+    form { display:flex; flex-direction:column; gap:.5rem; background:#fff; padding:1rem; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,.08); }
+    form input, form textarea { padding:.6rem .75rem; font:inherit; border:1px solid #cbd5e1; border-radius:6px; }
+    form textarea { resize:vertical; min-height:120px; }
+    form button { background:#2563eb; color:#fff; border:none; padding:.7rem 1rem; font:inherit; border-radius:6px; cursor:pointer; font-weight:600; }
+    form button:hover { background:#1d4ed8; }
+    .notes { margin-top:1.5rem; display:grid; gap:1rem; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
+    .note { background:#fff; padding:0.85rem 0.9rem 1rem; border-radius:10px; position:relative; display:flex; flex-direction:column; gap:.5rem; box-shadow:0 2px 4px rgba(0,0,0,.08); border:1px solid #e2e8f0; }
+    .note h3 { margin:.1rem 0 .25rem; font-size:1rem; line-height:1.2; }
+    .note p { margin:0; white-space:pre-wrap; font-size:.85rem; line-height:1.25rem; }
+    .note time { font-size:.65rem; text-transform:uppercase; letter-spacing:.5px; color:#64748b; }
+    .note-actions { display:flex; gap:.4rem; margin-top:auto; }
+    .note-actions button { flex:1; font-size:.7rem; padding:.4rem .5rem; border:1px solid #cbd5e1; background:#f1f5f9; color:#334155; border-radius:5px; cursor:pointer; }
+    .note-actions button:hover { background:#e2e8f0; }
+    .empty { text-align:center; margin:2rem 0; color:#64748b; font-size:.9rem; }
+    .row { display:flex; gap:.5rem; flex-wrap:wrap; }
+    #filter { flex:1; }
+    .danger { background:#dc2626 !important; color:#fff !important; border-color:#dc2626 !important; }
+    .danger:hover { background:#b91c1c !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Notes App</h1>
+  </header>
+  <main>
+    <form id="note-form">
+      <input id="title" placeholder="Title" />
+      <textarea id="content" placeholder="Write a note..."></textarea>
+      <div class="row">
+        <input id="filter" placeholder="Filter notes..." />
+        <button type="submit">Add Note</button>
+        <button type="button" id="clear-all" class="danger" title="Delete all notes">Clear All</button>
+      </div>
+    </form>
+    <section class="notes" id="notes"></section>
+    <p class="empty" id="empty" style="display:none">No notes yet. Add one above.</p>
+  </main>
+  <script>
+    const API = 'http://localhost:4000/api/notes';
+    const els = {
+      form: document.getElementById('note-form'),
+      title: document.getElementById('title'),
+      content: document.getElementById('content'),
+      notes: document.getElementById('notes'),
+      empty: document.getElementById('empty'),
+      filter: document.getElementById('filter'),
+      clearAll: document.getElementById('clear-all')
+    };
+
+    let allNotes = [];
+
+    function fmt(ts){ const d=new Date(ts); return d.toLocaleDateString()+" "+d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+
+    function render(){
+      const q = els.filter.value.toLowerCase();
+      const list = allNotes.filter(n => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q));
+      els.notes.innerHTML = '';
+      if(!list.length){ els.empty.style.display='block'; return; } else { els.empty.style.display='none'; }
+      list.forEach(n => {
+        const div = document.createElement('div');
+        div.className='note';
+        div.innerHTML = `
+          <time>${fmt(n.updatedAt || n.createdAt)}</time>
+          <h3 contenteditable="true" data-field="title" data-id="${n.id}">${n.title || 'Untitled'}</h3>
+          <p contenteditable="true" data-field="content" data-id="${n.id}">${(n.content || '').replace(/</g,'&lt;')}</p>
+          <div class="note-actions">
+            <button data-action="save" data-id="${n.id}">Save</button>
+            <button data-action="delete" data-id="${n.id}" class="danger">Delete</button>
+          </div>`;
+        els.notes.appendChild(div);
+      });
+    }
+
+    async function load(){
+      const res = await fetch(API); allNotes = await res.json(); render();
+    }
+
+    els.form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const title = els.title.value.trim();
+      const content = els.content.value.trim();
+      if(!title && !content) return;
+      const res = await fetch(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({title, content})});
+      const note = await res.json();
+      allNotes.unshift(note);
+      els.title.value=''; els.content.value='';
+      render();
+    });
+
+    els.notes.addEventListener('click', async e => {
+      const btn = e.target.closest('button'); if(!btn) return;
+      const id = btn.dataset.id;
+      if(btn.dataset.action === 'delete'){
+        if(!confirm('Delete this note?')) return;
+        await fetch(`${API}/${id}`, { method:'DELETE' });
+        allNotes = allNotes.filter(n => n.id !== id);
+        render();
+      } else if(btn.dataset.action === 'save'){
+        const titleEl = els.notes.querySelector(`[data-field="title"][data-id="${id}"]`);
+        const contentEl = els.notes.querySelector(`[data-field="content"][data-id="${id}"]`);
+        const payload = { title: titleEl.textContent.trim(), content: contentEl.textContent.trim() };
+        const res = await fetch(`${API}/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+        const updated = await res.json();
+        const idx = allNotes.findIndex(n=>n.id===id); if(idx>-1) allNotes[idx]=updated;
+        render();
+      }
+    });
+
+    els.filter.addEventListener('input', render);
+
+    els.clearAll.addEventListener('click', async () => {
+      if(!allNotes.length) return;
+      if(!confirm('Delete ALL notes?')) return;
+      await fetch(API, { method:'DELETE' });
+      allNotes = []; render();
+    });
+
+    load();
+  </script>
+</body>
+</html>
